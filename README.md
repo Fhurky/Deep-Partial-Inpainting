@@ -1,155 +1,258 @@
+# Partial Convolution İle Image Inpainting Modeli - Eğitim Rehberi
 
-# Partial-Conv-Inpainting (PConv-Inpainting)
+## 📋 İçindekiler
+1. [Model Hakkında](#model-hakkında)
+2. [Gereksinimler](#gereksinimler)
+3. [Veri Seti Hazırlığı](#veri-seti-hazırlığı)
+4. [Model Mimarisi](#model-mimarisi)
+5. [Eğitim Parametreleri](#eğitim-parametreleri)
+6. [Kullanım](#kullanım)
+7. [Çıktılar](#çıktılar)
+8. [Sorun Giderme](#sorun-giderme)
 
-> Image inpainting using Partial Convolution layers, based on NVIDIA's CVPR 2018 paper.
+## 🎯 Model Hakkında
 
-<div align="center">
-  <img src="assets/example_inpainting.png" alt="Inpainting Example" width="600"/>
-  <p><em>Left: Masked image | Center: Applied mask | Right: Inpainted output</em></p>
-</div>
+Bu model, **Partial Convolution** tabanlı bir U-Net mimarisi kullanarak görüntü tamamlama (image inpainting) işlemi gerçekleştirir. Model aşağıdaki özelliklere sahiptir:
 
----
+- **PConvUNet Generator**: Partial Convolution katmanları ile eksik bölgeleri tamamlar
+- **Discriminator**: Gerçek ve sahte görüntüleri ayırt eder (RaGAN kayıp fonksiyonu)
+- **VGG Feature Extractor**: Perceptual loss hesaplar
+- **Multi-scale Loss**: Piksel, algısal ve adversarial kayıp kombinasyonu
 
-## 📌 Overview
+### 🔧 Temel Özellikler
+- 512x512 çözünürlük desteği
+- Düzensiz (irregular) ve dikdörtgen maske türleri
+- Otomatik maske oluşturma
+- Gerçek zamanlı eğitim takibi
+- Görsel sonuç raporlama
 
-**Partial-Conv-Inpainting** is a deep learning project that performs **image inpainting** using Partial Convolutional (PConv) layers. This technique intelligently fills missing regions in an image by leveraging only known pixels, making it especially powerful for irregular holes or damaged areas.
+## 📦 Gereksinimler
 
-Originally proposed by **NVIDIA** in 2018, this method improves upon traditional convolutions by incorporating a binary mask that guides learning and inference.
-
----
-
-## 📂 Project Structure
-
-```
-Partial-Conv-Inpainting/
-├── data/              # Dataset images & masks
-├── src/               # Model, training, and utils
-├── checkpoints/       # Saved weights
-├── results/           # Inpainting outputs
-├── requirements.txt
-├── train.py
-├── evaluate.py
-└── inference.py
-```
-
----
-
-## 🚀 Features
-
-- ✅ Encoder-Decoder architecture with Partial Convolutional layers  
-- ✅ Support for **irregular and free-form masks**  
-- ✅ Optional GAN-based training for enhanced realism  
-- ✅ Clean training/evaluation/inference pipelines  
-- ✅ Easily extensible and well-documented  
-
----
-
-## 🧠 How It Works
-
-Partial Convolution only updates known pixels (based on an input binary mask), dynamically updating this mask as the image propagates through the network.
-
-- **Encoder** compresses masked input using PartialConv2D layers.  
-- **Decoder** upsamples the latent representation while continuing to refine missing areas.  
-- **Mask Update**: After every PConv layer, the mask is updated to reflect which pixels have been "filled."
-
-You may optionally use **GAN training** with:
-- `Generator`: Fills in the image.
-- `Discriminator`: Distinguishes real vs. fake images.
-
----
-
-## ⚙️ Installation
-
+### Python Kütüphaneleri
 ```bash
-git clone https://github.com/your-username/Partial-Conv-Inpainting.git
-cd Partial-Conv-Inpainting
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r requirements.txt
+pip install torch torchvision
+pip install pillow numpy opencv-python
+pip install matplotlib tqdm glob2
 ```
 
-### Python Requirements
+### Sistem Gereksinimleri
+- **GPU**: CUDA destekli (önerilen)
+- **RAM**: En az 8GB
+- **VRAM**: En az 8GB (512x512 için)
+- **Depolama**: Veri seti için yeterli alan
 
-- `torch >= 1.10`
-- `torchvision >= 0.11`
-- `opencv-python >= 4.5`
-- `Pillow`, `tqdm`, `numpy`
+## 📁 Veri Seti Hazırlığı
 
----
-
-## 📁 Dataset
-
-Use high-resolution datasets such as **CelebA-HQ**, **Places2**, or your custom dataset.
-
-Expected folder structure:
-
+### Klasör Yapısı
 ```
-data/
-├── images/
+projeniz/
+├── data/              # Eğitim görüntüleri
 │   ├── image1.jpg
+│   ├── image2.png
 │   └── ...
-└── masks/
-    ├── mask1.png
-    └── ...
+├── inpainting_results/  # Otomatik oluşturulur
+└── model_script.py
 ```
 
-> No masks? No problem! Random masks can be generated automatically during training.
+### Desteklenen Formatlar
+- PNG, JPG, JPEG, BMP, TIFF
+- Minimum 512x512 çözünürlük önerilir
+- RGB renk formatı
 
----
+### Önerilen Veri Setleri
+- **CelebA-HQ**: Yüz görüntüleri
+- **Places365**: Manzara görüntüleri
+- **DIV2K**: Yüksek çözünürlüklü genel görüntüler
 
-## 🔧 Training
+## 🏗️ Model Mimarisi
 
+### Generator (PConvUNet)
+```
+Encoder:  Conv7→Conv5→Conv5→Conv3→Conv3→Conv3→Conv3→Conv3
+          512→256→128→64→32→16→8→4→2
+
+Decoder:  Upsampling + Skip Connections
+          2→4→8→16→32→64→128→256→512
+```
+
+### Discriminator (PatchGAN)
+```
+Input: 3×512×512
+↓ Conv4×4, stride=2, LeakyReLU
+Output: 1×1 (Patch prediction)
+```
+
+### Kayıp Fonksiyonları
+1. **Pixel Loss (L1)**: `λ_pixel = 1.0`
+2. **Perceptual Loss (VGG)**: `λ_content = 1.0`  
+3. **Adversarial Loss (RaGAN)**: `λ_adv = 0.01`
+
+## ⚙️ Eğitim Parametreleri
+
+### Varsayılan Ayarlar
+```python
+BATCH_SIZE = 16        # GPU belleğine göre ayarlayın
+NUM_WORKERS = 4        # CPU core sayısı
+EPOCHS = 8             # Eğitim epoch sayısı
+IMG_SIZE = (512, 512)  # Görüntü boyutu
+
+LEARNING_RATE_G = 1e-4  # Generator öğrenme oranı
+LEARNING_RATE_D = 1e-4  # Discriminator öğrenme oranı
+```
+
+### Maske Parametreleri
+```python
+mask_type = "irregular"    # "rectangle" veya "irregular"
+max_masks = 3             # Maksimum maske sayısı
+max_size_ratio = 0.3      # Maksimum maske boyut oranı
+max_thickness = 20        # Maske kalınlığı
+```
+
+## 🚀 Kullanım
+
+### 1. Veri Seti Yolunu Ayarlayın
+```python
+BASE_DATASET_DIR = "./data"  # Kendi veri setinizin yolu
+```
+
+### 2. Modeli Çalıştırın
 ```bash
-python train.py \
-  --data_root ./data/images \
-  --mask_root ./data/masks \
-  --batch_size 32 \
-  --epochs 50 \
-  --lr_g 1e-4 \
-  --lr_d 1e-4 \
-  --gpu_ids 0
+python model_script.py
 ```
 
-- `--mask_root` is optional. If omitted, masks will be generated on-the-fly.
-- Model weights will be saved under `./checkpoints/`.
+### 3. Eğitim Süreci
+Model otomatik olarak:
+- Veri setini yükler
+- Rastgele maskeler oluşturur
+- Generator ve Discriminator'ı eğitir
+- Her epoch'ta örnek sonuçlar kaydeder
+- Kayıp grafikleri oluşturur
+
+## 📊 Çıktılar
+
+### Klasör Yapısı (Eğitim Sonrası)
+```
+inpainting_results/
+├── samples/                    # Örnek tamamlama sonuçları
+│   ├── samples_epoch_1.png
+│   ├── samples_epoch_2.png
+│   └── ...
+├── loss_curves_epoch_1.png     # Kayıp grafikleri
+├── loss_curves_epoch_2.png
+├── generator_final.pth         # Eğitilmiş generator
+└── discriminator_final.pth     # Eğitilmiş discriminator
+```
+
+### Görsel Çıktılar
+- **Örnek Sonuçlar**: Maskeli → Tamamlanmış → Orijinal karşılaştırma
+- **Kayıp Grafikleri**: 5 farklı metrik için epoch bazlı grafikler
+- **Model Ağırlıkları**: PyTorch `.pth` formatında
+
+## 🔍 Eğitim Takibi
+
+### Konsol Çıktısı
+```
+Epoch 1/8
+100%|██████████| 125/125 [02:34<00:00,  1.23s/it]
+Epoch 1 average: D_loss: 0.6891, G_loss: 1.2345, Content_loss: 0.0234, Adv_loss: 0.5678, Pixel_loss: 0.0987
+```
+
+### Kayıp Metrikleri
+- **D_loss**: Discriminator kaybı
+- **G_loss**: Generator toplam kaybı
+- **Content_loss**: VGG perceptual kaybı
+- **Adv_loss**: Adversarial kayıp
+- **Pixel_loss**: L1 piksel kaybı
+
+## 🛠️ Sorun Giderme
+
+### Yaygın Hatalar ve Çözümler
+
+#### 1. CUDA Out of Memory
+```python
+# Batch size'ı azaltın
+BATCH_SIZE = 8  # veya 4
+
+# Görüntü boyutunu küçültün
+IMG_SIZE = (256, 256)
+```
+
+#### 2. Düşük Performans
+```python
+# Learning rate ayarlayın
+LEARNING_RATE_G = 2e-4
+LEARNING_RATE_D = 2e-4
+
+# Epoch sayısını artırın
+EPOCHS = 20
+
+# Lambda değerlerini ayarlayın
+LAMBDA_PIXEL = 2.0
+LAMBDA_CONTENT = 0.5
+```
+
+#### 3. Maske Sorunları
+```python
+# Maske tipini değiştirin
+mask_type = "rectangle"  # Daha basit maskeler
+
+# Maske boyutunu ayarlayın
+max_size_ratio = 0.2  # Daha küçük maskeler
+```
+
+### Performans Optimizasyonu
+
+#### GPU Kullanımı
+```python
+# Multi-GPU desteği için
+if torch.cuda.device_count() > 1:
+    generator = nn.DataParallel(generator)
+    discriminator = nn.DataParallel(discriminator)
+```
+
+#### Bellek Optimizasyonu
+```python
+# Gradient accumulation
+accumulation_steps = 4
+BATCH_SIZE = BATCH_SIZE // accumulation_steps
+```
+
+## 📈 Model Değerlendirme
+
+### Kalite Metrikleri
+- **PSNR**: Peak Signal-to-Noise Ratio
+- **SSIM**: Structural Similarity Index
+- **LPIPS**: Learned Perceptual Image Patch Similarity
+
+### Test Etme
+```python
+# Eğitilmiş modeli yükle
+generator.load_state_dict(torch.load("./inpainting_results/generator_final.pth"))
+generator.eval()
+
+# Test görüntüsü ile tamamlama yap
+with torch.no_grad():
+    completed = generator(masked_image, mask)
+```
+
+## 🔄 Model Geliştirme
+
+### Hiperparametre Ayarlama
+- Learning rate schedules
+- Farklı kayıp ağırlıkları
+- Maske çeşitliliği
+- Augmentasyon teknikleri
+
+## 📚 Referanslar
+
+- [Image Inpainting for Irregular Holes Using Partial Convolutions](https://arxiv.org/abs/1804.07723)
+- [The Relativistic Discriminator: a key element missing from standard GAN](https://arxiv.org/abs/1807.00734)
+- [Perceptual Losses for Real-Time Style Transfer](https://arxiv.org/abs/1603.08155)
+
+## 📝 Lisans ve Kullanım
+
+Bu model akademik ve araştırma amaçlı kullanım için tasarlanmıştır. Ticari kullanım öncesinde ilgili makalelerin lisans koşullarını kontrol ediniz.
 
 ---
 
-## 📈 Evaluation
-
-Evaluate a trained model:
-
-```bash
-python evaluate.py \
-  --model_path ./checkpoints/best_model.pth \
-  --data_root ./data/images \
-  --mask_root ./data/masks \
-  --output_dir ./results
-```
-
----
-
-## ✨ Inference with Pretrained Model
-
-```bash
-python inference.py \
-  --image_path ./example.jpg \
-  --mask_path ./example_mask.png \
-  --model_path ./checkpoints/pretrained_model.pth \
-  --output_path ./output.png
-```
-
-> Download pretrained models from [Releases](https://github.com/your-username/Partial-Conv-Inpainting/releases)
-
----
-
-## 🧱 Model Architecture
-
-- **Encoder**: Stack of `PartialConv2D` layers with downsampling
-- **Decoder**: `Upsample + PConv` with skip connections (U-Net-like)
-- Each layer updates both image features and the mask
-
+**Not**: Bu model, GPU desteği ile en iyi performansı gösterir. CPU üzerinde eğitim oldukça yavaş olacaktır.
