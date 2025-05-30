@@ -243,12 +243,6 @@ with torch.no_grad():
 - Maske çeşitliliği
 - Augmentasyon teknikleri
 
-## 📚 Referanslar
-
-- [Image Inpainting for Irregular Holes Using Partial Convolutions](https://arxiv.org/abs/1804.07723)
-- [The Relativistic Discriminator: a key element missing from standard GAN](https://arxiv.org/abs/1807.00734)
-- [Perceptual Losses for Real-Time Style Transfer](https://arxiv.org/abs/1603.08155)
-
 ## 📝 Lisans ve Kullanım
 
 Bu model akademik ve araştırma amaçlı kullanım için tasarlanmıştır. Ticari kullanım öncesinde ilgili makalelerin lisans koşullarını kontrol ediniz.
